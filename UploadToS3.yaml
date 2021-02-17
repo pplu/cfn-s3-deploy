@@ -1,0 +1,62 @@
+  UploadToS3Role:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns: ['arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole']
+      Policies:
+      - PolicyName: lambdaaddservicerole
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+          - Effect: Allow
+            Action: [ 's3:PutObject', 's3:DeleteObject' ]
+            Resource: !Join [ '', [ { 'Fn::GetAtt': [ Bucket, Arn ] }, '/*' ] ]
+  UploadToS3:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Runtime: python3.7
+      Handler: index.handler
+      Timeout: 300
+      Role: !GetAtt UploadToS3Role.Arn
+      Code:
+        ZipFile: |
+          import json
+          import cfnresponse
+          import boto3
+          import logging
+          import traceback
+
+          LOGGER = logging.getLogger()
+          LOGGER.setLevel(logging.INFO)
+
+          def handler(event, context):
+            try:
+              LOGGER.info('Event structure: %s', event)
+
+              dest_bucket = event['ResourceProperties']['DestinationBucket']
+              dest_key = event['ResourceProperties']['DestinationKey']
+
+              s3_resource = boto3.resource('s3')
+              file = s3_resource.Object(bucket_name=dest_bucket, key=dest_key)
+ 
+              if event['RequestType'] == 'Create' or event['RequestType'] == 'Update':
+               
+                dest_content = event['ResourceProperties']['Content']
+                file.put(
+                  Body=dest_content
+                )
+
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, {}, f'{dest_bucket}/{dest_key}')
+              elif event['RequestType'] == 'Delete':
+                file.delete()
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+            except Exception as e:
+              LOGGER.error(e)
+              cfnresponse.send(event, context, cfnresponse.FAILED, {})
+              traceback.print_exc()
